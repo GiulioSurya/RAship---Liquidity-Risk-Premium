@@ -8,6 +8,21 @@ Extracting liquidity factors from these proxies with factor models (Stock and Wa
 Conducting regression analysis to identify and measure the illiquidity premium.
 This repository will include data preparation scripts, factor extraction methods, and analytical results.
 
+### Workflow
+
+1. **Documentation of Proxies and Requirements**  
+   I will begin by creating a comprehensive document that will serve as the foundation for dataset construction. This document will outline each liquidity proxy, including necessary information such as assumptions (e.g., model-based considerations) and the implementation steps. This reference will guide the coding and ensure consistency in constructing the dataset.
+
+2. **Data Collection**  
+   Once the documentation is complete, I will use data sources like Datastream, Bloomberg, or other available platforms to gather the necessary data.
+
+3. **Dataset Creation**  
+   Using R, I will build a dataset containing all the specified liquidity proxies.
+
+4. **Analysis and Review**  
+   Finally, I will proceed with the analysis in collaboration with Professor Luca Trapin to interpret results and refine the approach as needed.
+
+
 
 
 
