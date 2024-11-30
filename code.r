@@ -170,3 +170,78 @@ effective_tick[i,m-1]<- sum(g_j * s_j) / mean_price
 }
 
 
+#################### EFFECTIVE TICK FUNCTION###############
+
+calc_tick <- function(X) { 
+  effective_tick <- numeric(ncol(X) - 1)
+
+  for (i in 2:(ncol(X))) {
+    cents <- X[,2] - floor(X[,2])
+    cents <- round(cents*100)
+    #cluster
+    cluster <- ifelse(cents %% 100 == 0, 1.00,                    # Dollar
+                      ifelse(cents %% 25 == 0, 0.25,              # Quarter
+                             ifelse(cents %% 10 == 0, 0.10,       # Dime
+                                    ifelse(cents %% 5 == 0, 0.05, # Nickel
+                                           0.01))))               # penny
+    N_j <- table(cluster)
+    F_j <- N_j / sum(N_j) 
+
+    # Step 4: Calcolare le probabilità non vincolate
+    #inizializzazione
+    U_j <- numeric(length(F_j))
+    names(U_j) <- names(F_j)
+
+    
+if (length(F_j) > 1) {
+    # Ciclo per gruppi con almeno 3 elementi
+    if (length(F_j) > 2) {
+        for (j in 2:(length(F_j) - 1)) {
+            U_j[j] <- 2 * F_j[j] - F_j[j - 1]
+        }
+    }
+    # Assegnazione per l'ultimo elemento
+    U_j[length(F_j)] <- F_j[length(F_j)] - F_j[length(F_j) - 1]
+} else if (length(F_j) == 2) {
+    # Caso con un solo elemento: assegna valore direttamente
+    U_j[2] <- F_j[2] - F_j[1] # O un altro valore significativo
+}
+    # Step 5: Vincolare le probabilità
+    #inizializzazione
+    g_j <- numeric(length(U_j))
+    names(g_j) <- names(U_j)
+
+    g_j[1] <- pmin(pmax(U_j[1], 0), 1)
+    if(length(g_j) > 1) {
+      for (j in 2:length(U_j)) {
+        g_j[j] <- pmin(pmax(U_j[j], 0), 1 - sum(g_j[1:(j - 1)]))
+      }
+    }
+
+    # sum(g_j)
+    # Step 6: Determinare lo spread effettivo per ciascun cluster
+    s_j <- as.numeric(names(F_j))
+    
+    # Step 7: Calcolare il prezzo medio
+    mean_price <- mean(data_effective1[,i])
+    
+    # Step 8: Calcolare l'Effective Tick
+    effective_tick[i - 1L]<- sum(g_j * s_j) / mean_price
+  }
+  effective_tick |> t() |> as.data.frame() |> setNames(names(X)[-1L])
+}
+
+Month <- format(data_effective1$data, "%Y-%m")
+
+effective_tick<-by(data_effective1, Month, calc_tick) |> 
+  data.table::rbindlist(idcol = TRUE) |>
+  as.data.frame()
+#>       .id ABBOTT.LABORATORIES ALLSTATE.ORD.SHS
+#> 1 2012-11        0.0003235766     0.0002465483
+
+split(data_effective1, Month) |>
+  lapply(calc_tick) |> 
+  data.table::rbindlist(idcol = TRUE) |>
+  as.data.frame()
+#>       .id ABBOTT.LABORATORIES ALLSTATE.ORD.SHS
+#> 1 2012-11        0.0003235766     0.0002465483
