@@ -176,7 +176,7 @@ calc_tick <- function(X) {
   effective_tick <- numeric(ncol(X) - 1)
 
   for (i in 2:(ncol(X))) {
-    cents <- X[,2] - floor(X[,2])
+    cents <- X[,i] - floor(X[,i])
     cents <- round(cents*100)
     #cluster
     cluster <- ifelse(cents %% 100 == 0, 1.00,                    # Dollar
@@ -239,9 +239,163 @@ effective_tick<-by(data_effective1, Month, calc_tick) |>
 #>       .id ABBOTT.LABORATORIES ALLSTATE.ORD.SHS
 #> 1 2012-11        0.0003235766     0.0002465483
 
-split(data_effective1, Month) |>
+effective_tick<-split(data_effective1, Month) |>
   lapply(calc_tick) |> 
   data.table::rbindlist(idcol = TRUE) |>
   as.data.frame()
 #>       .id ABBOTT.LABORATORIES ALLSTATE.ORD.SHS
 #> 1 2012-11        0.0003235766     0.0002465483
+
+#################### HOLDEN ####################################
+rm(list = ls())
+load("data.RData")
+
+data<- data[, c(1, 2, 4, seq(4, ncol(data), by = 8))]
+data<-data[,-3]
+data_roll <- data[,-2]
+data_holden<-as.data.frame(data_roll)
+
+str(head(data_holden))
+dput(head(data_holden))
+
+data_test<-data_holden[,1:2]
+
+
+############################## LOT ##############################
+
+rm(list = ls())
+
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(lubridate)
+library(optimx)
+
+load("data.RData")
+data<- data[, c(1, 2, 4, seq(4, ncol(data), by = 8))]
+data<-data[,-3]
+
+data_lot<-data[,1:3]
+
+# Rinominiamo le colonne per semplicità
+colnames(data_lot) <- c("Date", "Market_Price", "Stock_Price")
+
+# Calcoliamo i rendimenti giornalieri per il mercato e il titolo
+data_lot <- data_lot[order(data_lot$Date), ]  # Assicuriamoci che i dati siano ordinati per data
+
+data_lot$R_mt <- c(NA, diff(data_lot$Market_Price) / data_lot$Market_Price[-nrow(data_lot)])
+data_lot$R_jt <- c(NA, diff(data_lot$Stock_Price) / data_lot$Stock_Price[-nrow(data_lot)])
+
+# Rimuoviamo le prime osservazioni NA
+data_lot <- na.omit(data_lot)
+
+# Classifichiamo le osservazioni nelle regioni:
+# Regione 1: R_jt != 0 e R_mt < 0 (Regione di Vendita)
+# Regione 2: R_jt != 0 e R_mt > 0 (Regione di Acquisto)
+# Regione 0: R_jt == 0 (Nessuna Transazione)
+
+
+data_lot$Region <- with(data_lot, ifelse(R_jt == 0, 0,
+                                  ifelse(R_mt < 0 & R_jt != 0, 1,
+                                         ifelse(R_mt > 0 & R_jt != 0, 2, NA))))
+
+# Rimuoviamo eventuali osservazioni NA nella colonna 'Region'
+data_lot <- data_lot[!is.na(data_lot$Region), ]
+
+#prendere in cosindierazione di inizializzare beta in qualche modo
+
+
+# Impostiamo le stime iniziali per gli altri parametri
+initial_alpha1 <- -0.01  # Deve essere negativo
+initial_alpha2 <- 0.01  # Deve essere positivo
+initial_sigma <- 1
+initial_beta <- 0.5
+
+# Funzione di log-verosimiglianza
+log_likelihood <- function(params, data) {
+  alpha1 <- params[1]  # Soglia inferiore (negativa)
+  alpha2 <- params[2]  # Soglia superiore (positiva)
+  beta_j <- params[3]  # Coefficiente beta
+  sigma_j <- params[4] # Deviazione standard (positiva)
+  
+  if (alpha1 >= alpha2) return(Inf)
+    if (sigma_j <= 0) return(Inf)
+    if(beta_j <= 0) return(Inf)
+    
+  R_mt <- data$R_mt
+  R_jt <- data$R_jt
+
+  
+  # Calcoliamo R_jt^* (rendimenti veri non osservati)
+  #qua devo aggiungerlo epsilon? in caso come?
+
+  R_star <- beta_j * R_mt  
+  
+
+  # Calcoliamo la log-verosimiglianza per ciascuna regione
+  ll <- numeric(3)
+
+#questi servono per la regione 0
+  z1 <- (alpha2 - beta_j * R_mt) / sigma_j
+    z2 <- (alpha1 - beta_j * R_mt) / sigma_j
+  
+  # Regione 1: R_jt != 0 e R_mt < 0
+  idx1 <- which(data$Region == 1)
+  R_jt_obs1 <- R_jt[idx1]
+  R_mt_obs1 <- R_mt[idx1]
+  ll[1] <- sum(log(0.5*(2*pi*sigma_j^2)^0.5)) - sum((0.5*(2*sigma_j^2))*(R_jt_obs1 - alpha1 - beta_j * R_mt_obs1)^2)
+
+
+  # Regione 2: R_jt != 0 e R_mt > 0
+  idx2 <- which(data$Region == 2)
+  R_jt_obs2 <- R_jt[idx2]
+    R_mt_obs2 <- R_mt[idx2]
+  ll[2] <- sum(log(0.5*(2*pi*sigma_j^2)^0.5)) - sum((0.5*(2*sigma_j^2))*(R_jt_obs2 - alpha2 - beta_j * R_mt_obs2)^2)
+  
+  # Regione 0: R_jt == 0
+  idx0 <- which(data$Region == 0)
+  z1_0 <- z1[idx0]
+  z2_0 <- z2[idx0]
+  ll[3] <- sum(log(pnorm(z1_0) - pnorm(z2_0) + 1e-10))
+ # Aggiungiamo un piccolo valore per evitare log(0)
+
+
+  
+  # Calcoliamo la log-verosimiglianza totale (negativa per minimizzare)
+  return(-sum(ll))
+}
+
+# Impostiamo i parametri iniziali
+initial_params <- c(alpha1 = initial_alpha1,
+                    alpha2 = initial_alpha2,
+                    beta_j = initial_beta,
+                    sigma_j = initial_sigma)
+
+# Impostiamo i vincoli sui parametri
+lower_bounds <- c(-Inf, 0, 0, 0)
+upper_bounds <- c(0, Inf, Inf, Inf)
+
+# Utilizziamo l'ottimizzazione numerica per massimizzare la log-verosimiglianza
+optim_result <- optimx(par = initial_params,
+                       fn = log_likelihood,
+                       data = data_lot,
+                       lower = lower_bounds,
+                       upper = upper_bounds,
+                       method = c("L-BFGS-B", "nlminb", "Nelder-Mead", "spg", "BFGS"))
+
+# Estraiamo i parametri stimati
+estimated_params <- optim_result[2,1:4]
+
+
+LOT_cost <- estimated_params[2] - estimated_params[1]
+
+beta<-estimated_params[3]
+Rmt<-data_lot$R_mt
+R_jt_start<-Rmt*as.numeric(beta)
+
+error<-data_lot$R_jt-R_jt_start
+sigma_j<-as.numeric(estimated_params[4])
+
+plot(density(error), main = "Error Density", xlab = "Error", ylab = "Density")
+
+
